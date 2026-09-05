@@ -1,5 +1,10 @@
 //! Single-threaded BTstack runtime and transport boundary.
 
+mod gatt;
+mod runtime;
+pub use gatt::*;
+pub use runtime::Runtime;
+
 use std::time::Duration;
 
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
