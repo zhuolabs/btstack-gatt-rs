@@ -1,0 +1,1 @@
+//! Safe GATT peripheral API.

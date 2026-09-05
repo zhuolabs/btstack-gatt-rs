@@ -1,0 +1,3 @@
+[submodule "vendor/btstack"]
+	path = vendor/btstack
+	url = https://github.com/bluekitchen/btstack.git

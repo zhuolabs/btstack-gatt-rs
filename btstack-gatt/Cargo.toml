@@ -1,0 +1,7 @@
+[package]
+name = "btstack-gatt"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+btstack-core = { path = "../btstack-core" }

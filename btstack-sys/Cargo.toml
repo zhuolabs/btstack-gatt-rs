@@ -1,0 +1,8 @@
+[package]
+name = "btstack-sys"
+version.workspace = true
+edition.workspace = true
+links = "btstack"
+
+[build-dependencies]
+cc = "1"

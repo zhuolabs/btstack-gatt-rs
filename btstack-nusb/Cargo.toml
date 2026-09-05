@@ -1,0 +1,8 @@
+[package]
+name = "btstack-nusb"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+btstack-core = { path = "../btstack-core" }
+nusb = "0.2"

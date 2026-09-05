@@ -1,0 +1,8 @@
+[package]
+name = "gatt-peripheral"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+btstack-gatt = { path = "../../btstack-gatt" }
+btstack-nusb = { path = "../../btstack-nusb" }
