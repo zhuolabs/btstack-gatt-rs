@@ -74,3 +74,21 @@ delivers an empty scan response before the advertisement containing the name.
 Linux/macOS builds and hardware; simultaneous multiple Centrals; forced USB removal
 during traffic; long-duration stress/throughput; pairing/encryption. These are not
 claimed as verified by the startup and GATT smoke tests above.
+
+## USB selection and Android FD support — 2026-09-06
+
+- `--vid 0411 --did 0374 --seconds 2`: actual Windows controller startup,
+  advertising confirmation, and shutdown pass (`--did` aliases `--pid`).
+- Host workspace tests: nine pass, including three CLI tests for hexadecimal IDs,
+  missing/duplicate/invalid arguments, and default selection.
+- Android workspace cross-build passes for arm64-v8a, armeabi-v7a, x86_64, and x86,
+  using NDK 27.0.12077973 and API level 23.
+- Android ARM64 `cargo test --workspace --no-run` builds and links the tests,
+  including non-USB FD rejection, preservation of borrowed FDs on failure, and
+  rejection of desktop enumeration on Android. These Android tests were compiled,
+  not executed; no Android device was attached.
+- Android USB permission and GATT operation on real hardware remain unverified.
+- Windows and Android ARM64 Clippy pass with warnings denied. The Android TLS
+  macro expansion produces a spurious `missing_const_for_thread_local` lint even
+  with const initializers; its allowance is scoped to the TLS declarations on
+  Android. Rust examples in `docs/ANDROID.md` also type-check for Android ARM64.

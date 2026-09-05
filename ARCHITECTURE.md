@@ -22,6 +22,11 @@ Reviewed upstream `src/hci_transport.h`, `src/btstack_run_loop.h`,
   typed bulk/interrupt endpoints. Windows requires WinUSB (already installed on
   the supplied 0411:0374). Linux needs USB permissions and kernel-driver detach.
   See <https://docs.rs/nusb/latest/nusb/>.
+* Desktop callers can select VID/PID or pass an already opened nusb device.
+  Android callers obtain USB permission through UsbManager and pass an `OwnedFd`
+  to `NusbHciTransport::from_fd`, which uses `nusb::Device::from_fd` without
+  enumeration. `from_borrowed_fd` duplicates the caller's FD. All paths share
+  interface 0 claim and endpoint discovery. See `docs/ANDROID.md` for ownership.
 * BTstack's embedded run loop has `execute_once` and timer processing, but its
   callback list is not a host-thread-safe queue. Only the stack thread accesses it.
   Rust channels wake the owning thread with `recv_timeout`; USB workers never

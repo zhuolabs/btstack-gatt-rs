@@ -14,13 +14,20 @@ use std::{
 
 static ACTIVE: AtomicBool = AtomicBool::new(false);
 static NEXT_CONNECTION: AtomicU64 = AtomicU64::new(1);
-thread_local! {
-    static TRANSPORT: RefCell<Option<Box<dyn HciTransport>>> = RefCell::new(None);
-    static STATE: RefCell<Option<State>> = const { RefCell::new(None) };
-    static EPOCH: Instant = Instant::now();
-    static EVENTS: RefCell<VecDeque<(u8,u16,u16)>> = const { RefCell::new(VecDeque::new()) };
-    static FAILURE: RefCell<Option<String>> = const { RefCell::new(None) };
+// Android's fallback TLS macro expansion triggers this lint even for the const
+// initializers below. EPOCH must use the runtime clock.
+#[cfg_attr(target_os = "android", allow(clippy::missing_const_for_thread_local))]
+mod locals {
+    use super::*;
+    thread_local! {
+        pub(super) static TRANSPORT: RefCell<Option<Box<dyn HciTransport>>> = const { RefCell::new(None) };
+        pub(super) static STATE: RefCell<Option<State>> = const { RefCell::new(None) };
+        pub(super) static EPOCH: Instant = Instant::now();
+        pub(super) static EVENTS: RefCell<VecDeque<(u8,u16,u16)>> = const { RefCell::new(VecDeque::new()) };
+        pub(super) static FAILURE: RefCell<Option<String>> = const { RefCell::new(None) };
+    }
 }
+use locals::*;
 
 struct Attribute {
     handle: u16,

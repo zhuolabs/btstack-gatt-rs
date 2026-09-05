@@ -21,7 +21,19 @@ cargo build --workspace
 cargo run -p gatt-peripheral
 ```
 
-The example opens `0411:0374` and advertises as `Rust GATT`.
+The example defaults to `0411:0374` and advertises as `Rust GATT`.
+Select another device with `--vid` and `--pid` (`--did` is an alias for `--pid`):
+
+```powershell
+cargo run -p gatt-peripheral -- --vid 0411 --pid 0374
+cargo run -p gatt-peripheral -- --vid 0x0411 --did 0x0374 --probe
+```
+
+IDs are hexadecimal, with or without the `0x` prefix. Supply both IDs together.
+Use `--help` to list options. If multiple devices match, opening fails instead of
+silently selecting one; use the library's `from_device` API to select a particular
+opened nusb device.
+
 Press `Ctrl+C` to stop advertising, close connections, and release the USB interface.
 To run for a fixed duration or only probe the USB device:
 
@@ -54,6 +66,35 @@ On Windows, the target dongle requires **WinUSB**. It was already installed on
 the tested dongle; no driver changes were made.
 Linux uses `detach_and_claim_interface` and requires USB access permissions.
 Linux hardware has not been tested.
+
+## Selecting a device from Rust
+
+```rust
+use btstack_nusb::{NusbHciTransport, UsbDeviceSelector};
+
+let transport = NusbHciTransport::open(UsbDeviceSelector::new(0x0411, 0x0374))?;
+// Pass transport to GattServer::builder(transport).
+```
+
+`NusbHciTransport::from_device(device)` also accepts an already opened
+`nusb::Device`. All entry points share interface claim and endpoint discovery.
+
+## Android
+
+Android applications can pass a permission-granted USB file descriptor through
+`NusbHciTransport::from_fd(OwnedFd)`. This uses
+[`nusb::Device::from_fd`](https://docs.rs/nusb/0.2.7/nusb/struct.Device.html#method.from_fd)
+without device enumeration. `from_borrowed_fd(BorrowedFd)` duplicates the FD first,
+so Rust does not take ownership of the original Android connection's descriptor.
+Both APIs are also available on Linux.
+
+See [Android integration](docs/ANDROID.md) for permission handling, Rust examples,
+FD ownership, and NDK build commands. The existing CLI is for desktop enumeration;
+an Android app should call the FD API through its native integration.
+
+All four Android ABIs cross-build successfully with NDK 27 and API level 23.
+Android USB hardware operation has not been verified. This repository provides
+the native Rust library, not a complete Android APK or a JNI application layer.
 
 ## Exposed services
 

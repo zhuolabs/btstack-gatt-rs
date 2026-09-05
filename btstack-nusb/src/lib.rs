@@ -41,7 +41,7 @@ impl NusbHciTransport {
     /// Opens a desktop USB controller selected by VID/PID.
     ///
     /// Android applications must obtain USB permission through UsbManager and
-    /// use [`Self::from_fd`] or [`Self::from_borrowed_fd`] instead of enumeration.
+    /// use `from_fd` or `from_borrowed_fd` instead of enumeration.
     /// Multiple matching devices are rejected; use [`Self::from_device`] to pass
     /// a particular device selected by the application.
     #[cfg(not(target_os = "android"))]
