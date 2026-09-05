@@ -25,7 +25,8 @@ Reviewed upstream `src/hci_transport.h`, `src/btstack_run_loop.h`,
 * BTstack's embedded run loop has `execute_once` and timer processing, but its
   callback list is not a host-thread-safe queue. Only the stack thread accesses it.
   Rust channels wake the owning thread with `recv_timeout`; USB workers never
-  call BTstack. Timers are serviced at least every 5 ms. No Tokio dependency.
+  call BTstack. Idle waits are bounded to 5 ms; synchronous USB sends or application
+  callbacks can delay timer servicing. No Tokio dependency.
 * `cc` builds the BLE peripheral subset from `example/Makefile.inc`: memory,
   run loop, HCI, L2CAP, crypto, ATT, SM, and an in-memory LE device database.
   Build definitions are maintained in `btstack-sys/c/btstack_config.h`.
@@ -41,7 +42,9 @@ a running server. The example composes them. Dependencies are acyclic.
 Database construction uses BTstack's `att_db_util` on the owning thread; returned
 handles remain internal. UUIDs use canonical big-endian byte order. CCCDs are
 maintained per connection. Notifications are queued and sent only on BTstack's
-can-send-now event. Read offsets and prepared-write rejection are handled inside
+can-send notification callback. The bridge uses per-connection registrations with
+`att_server_request_to_send_notification`; the deprecated `ATT_EVENT_CAN_SEND_NOW`
+event has no connection handle. Read offsets and prepared-write rejection are handled inside
 the wrapper. The first version uses unencrypted attributes and volatile pairing
 storage. Multiple simultaneous adapter instances are rejected because BTstack
 has process-global state.
@@ -56,3 +59,8 @@ has process-global state.
 
 Over-the-air discovery and a real Central's read/write/notification checks must
 be distinguished from controller command-complete evidence.
+
+All five milestones and real Central read/write/notification/reconnection checks
+passed on Windows with 0411:0374. See `docs/VALIDATION.md`. Descriptor/permission
+builders, indications, persistent bonding, and async APIs remain outside this
+initial implementation.
