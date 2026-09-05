@@ -30,6 +30,11 @@ fn main() {
     ] {
         build.file(format!("{root}/{file}"));
     }
+    if build.get_compiler().is_like_msvc() {
+        build.flag("/we4013"); // Undeclared FFI functions are build errors.
+    } else {
+        build.flag("-Werror=implicit-function-declaration");
+    }
     build.file("c/bridge.c").warnings(false).compile("btstack");
     println!("cargo:rerun-if-changed=c");
     println!("cargo:rerun-if-changed=../vendor/btstack");

@@ -17,5 +17,6 @@ unsafe extern "C" {
     pub fn rs_request_send(connection: u16);
     pub fn rs_notify(connection: u16, attribute: u16, data: *const u8, len: u16) -> u8;
     pub fn rs_stop();
+    pub fn rs_is_off() -> i32;
     pub fn rs_deinit();
 }

@@ -5,7 +5,7 @@ use std::{
     collections::{HashMap, VecDeque},
     panic::{AssertUnwindSafe, catch_unwind},
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         mpsc,
     },
     thread,
@@ -13,6 +13,7 @@ use std::{
 };
 
 static ACTIVE: AtomicBool = AtomicBool::new(false);
+static NEXT_CONNECTION: AtomicU64 = AtomicU64::new(1);
 thread_local! {
     static TRANSPORT: RefCell<Option<Box<dyn HciTransport>>> = RefCell::new(None);
     static STATE: RefCell<Option<State>> = const { RefCell::new(None) };
@@ -31,7 +32,6 @@ struct State {
     subscriptions: HashMap<(u16, u16), bool>,
     reads: HashMap<(u16, u16), Vec<u8>>,
     pending: VecDeque<(GattConnection, u16, Vec<u8>)>,
-    next_id: u64,
     events: mpsc::Sender<ServerEvent>,
 }
 enum Command {
@@ -85,7 +85,6 @@ impl Runtime {
                         subscriptions: HashMap::new(),
                         reads: HashMap::new(),
                         pending: VecDeque::new(),
-                        next_id: 1,
                         events: event_tx.clone(),
                     })
                 });
@@ -109,17 +108,20 @@ impl Runtime {
                         }
                     }
                 }
-                let result = (|| {
+                let result = catch_unwind(AssertUnwindSafe(|| {
                     if unsafe { sys::rs_start(read, write, adv.as_ptr(), adv.len() as u8) } != 0 {
                         return Err("HCI power-on failed".into());
                     }
                     run(rx, ready_tx)
-                })();
+                }))
+                .unwrap_or_else(|_| Err("BTstack runtime callback panicked".into()));
+                let shutdown_result = catch_unwind(AssertUnwindSafe(stop_controller))
+                    .unwrap_or_else(|_| Err("Transport panicked during shutdown".into()));
+                let result = result.and(shutdown_result);
                 if let Err(e) = &result {
                     let _ = event_tx.send(ServerEvent::Error(format!("{e}")));
                 }
                 unsafe {
-                    sys::rs_stop();
                     sys::rs_deinit();
                 }
                 STATE.with(|s| *s.borrow_mut() = None);
@@ -158,6 +160,9 @@ impl Runtime {
         characteristic: Uuid,
         value: &[u8],
     ) -> Result<(), Error> {
+        if STATE.with(|s| s.borrow().is_some()) {
+            return Err("Do not call blocking server methods from a GATT callback".into());
+        }
         if value.len() > 512 {
             return Err("ATT value exceeds 512 bytes".into());
         }
@@ -175,6 +180,14 @@ impl Runtime {
             .map_err(Into::into)
     }
     pub fn shutdown(&mut self) -> Result<(), Error> {
+        if self
+            .worker
+            .as_ref()
+            .is_some_and(|w| w.thread().id() == thread::current().id())
+        {
+            let _ = self.commands.try_send(Command::Stop);
+            return Err("Cannot join the BTstack thread from its own callback".into());
+        }
         if let Some(worker) = self.worker.take() {
             let _ = self.commands.send(Command::Stop);
             worker.join().map_err(|_| "BTstack thread panicked")??;
@@ -188,11 +201,55 @@ impl Drop for Runtime {
     }
 }
 
+fn stop_controller() -> Result<(), Error> {
+    unsafe {
+        sys::rs_stop();
+    }
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while unsafe { sys::rs_is_off() } == 0 {
+        if Instant::now() >= deadline {
+            return Err("Controller shutdown timed out".into());
+        }
+        let packet = TRANSPORT.with(|t| {
+            t.borrow_mut()
+                .as_mut()
+                .unwrap()
+                .receive(Duration::from_millis(5))
+        })?;
+        if let Some(mut packet) = packet {
+            validate_packet(&packet)?;
+            if std::env::var_os("BTSTACK_HCI_TRACE").is_some() {
+                eprintln!("HCI RX {} {:02x?}", packet.kind, packet.data);
+            }
+            unsafe {
+                sys::rs_receive(
+                    packet.kind,
+                    packet.data.as_mut_ptr(),
+                    packet.data.len() as u16,
+                );
+            }
+        }
+        unsafe {
+            sys::rs_poll();
+        }
+        if let Some(error) = FAILURE.with(|f| f.borrow_mut().take()) {
+            return Err(error.into());
+        }
+    }
+    println!("BTstack HCI_STATE_OFF (controller shutdown complete)");
+    Ok(())
+}
+
 fn run(commands: mpsc::Receiver<Command>, ready: mpsc::SyncSender<()>) -> Result<(), Error> {
     let start = Instant::now();
     let mut started = false;
     loop {
-        for command in commands.try_iter().take(128) {
+        for _ in 0..128 {
+            let command = match commands.try_recv() {
+                Ok(command) => command,
+                Err(mpsc::TryRecvError::Empty) => break,
+                Err(mpsc::TryRecvError::Disconnected) => return Ok(()),
+            };
             match command {
                 Command::Stop => return Ok(()),
                 Command::Notify(connection, uuid, value, response) => {
@@ -283,10 +340,9 @@ fn run(commands: mpsc::Receiver<Command>, ready: mpsc::SyncSender<()>) -> Result
                     if kind == 3 {
                         let c = GattConnection {
                             handle,
-                            generation: s.next_id,
+                            generation: NEXT_CONNECTION.fetch_add(1, Ordering::Relaxed),
                             mtu: value,
                         };
-                        s.next_id += 1;
                         s.connections.insert(handle, c.clone());
                         let _ = s.events.send(ServerEvent::Connected(c));
                     } else if kind == 4 {
@@ -540,4 +596,147 @@ unsafe extern "C" fn write(
         })
     }))
     .unwrap_or(GattStatus::UnlikelyError as i32)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+
+    fn setup(characteristic: GattCharacteristic) -> mpsc::Receiver<ServerEvent> {
+        let (tx, rx) = mpsc::channel();
+        STATE.with(|s| {
+            *s.borrow_mut() = Some(State {
+                attributes: vec![Attribute {
+                    handle: 10,
+                    characteristic,
+                }],
+                connections: [1, 2]
+                    .into_iter()
+                    .map(|handle| {
+                        (
+                            handle,
+                            GattConnection {
+                                handle,
+                                generation: handle as u64,
+                                mtu: 23,
+                            },
+                        )
+                    })
+                    .collect(),
+                subscriptions: HashMap::new(),
+                reads: HashMap::new(),
+                pending: VecDeque::new(),
+                events: tx,
+            })
+        });
+        rx
+    }
+
+    #[test]
+    fn read_probe_and_copy_use_one_snapshot_and_handle_offsets() {
+        let calls = Arc::new(AtomicU64::new(0));
+        let count = calls.clone();
+        let _events = setup(GattCharacteristic::new([1; 16]).read().on_read(move |_| {
+            count.fetch_add(1, Ordering::Relaxed);
+            Ok(b"abcdef".to_vec())
+        }));
+        unsafe {
+            assert_eq!(read(1, 10, 0, std::ptr::null_mut(), 0), 6);
+            let mut buffer = [0; 3];
+            assert_eq!(read(1, 10, 2, buffer.as_mut_ptr(), 3), 3);
+            assert_eq!(&buffer, b"cde");
+            assert_eq!(calls.load(Ordering::Relaxed), 1);
+            assert_eq!(read(1, 10, 7, buffer.as_mut_ptr(), 3), 0xfe07);
+            assert_eq!(read(1, 10, 6, buffer.as_mut_ptr(), 3), 0);
+        }
+    }
+
+    #[test]
+    fn cccd_is_per_connection_and_rejects_unsupported_bits() {
+        let events = setup(GattCharacteristic::new([1; 16]).notify());
+        unsafe {
+            assert_eq!(write(1, 11, 0, 0, [1, 0].as_mut_ptr(), 2), 0);
+            assert!(matches!(
+                events.try_recv().unwrap(),
+                ServerEvent::SubscriptionChanged {
+                    subscription: SubscriptionType::Notify,
+                    ..
+                }
+            ));
+            let mut buffer = [0; 2];
+            assert_eq!(read(1, 11, 0, buffer.as_mut_ptr(), 2), 2);
+            assert_eq!(buffer, [1, 0]);
+            assert_eq!(read(2, 11, 0, buffer.as_mut_ptr(), 2), 2);
+            assert_eq!(buffer, [0, 0]);
+            assert_eq!(write(1, 11, 0, 0, [2, 0].as_mut_ptr(), 2), 19);
+            assert_eq!(write(1, 11, 0, 0, [1].as_mut_ptr(), 1), 13);
+            assert_eq!(write(1, 11, 0, 0, [0, 0].as_mut_ptr(), 2), 0);
+            assert_eq!(read(1, 11, 0, buffer.as_mut_ptr(), 2), 2);
+            assert_eq!(buffer, [0, 0]);
+        }
+    }
+
+    #[test]
+    fn prepared_and_offset_writes_never_invoke_application() {
+        let calls = Arc::new(AtomicU64::new(0));
+        let count = calls.clone();
+        let _events = setup(GattCharacteristic::new([1; 16]).write().on_write(move |_| {
+            count.fetch_add(1, Ordering::Relaxed);
+            Ok(())
+        }));
+        unsafe {
+            assert_eq!(write(1, 10, 1, 0, [1].as_mut_ptr(), 1), 6);
+            assert_eq!(write(1, 10, 0, 1, [1].as_mut_ptr(), 1), 7);
+            assert_eq!(calls.load(Ordering::Relaxed), 0);
+            assert_eq!(write(1, 10, 0, 0, std::ptr::null_mut(), 0), 0);
+            assert_eq!(calls.load(Ordering::Relaxed), 1);
+        }
+    }
+
+    #[test]
+    fn application_panics_do_not_cross_c_boundary() {
+        let _events = setup(
+            GattCharacteristic::new([1; 16])
+                .read()
+                .write()
+                .on_read(|_| panic!("read panic"))
+                .on_write(|_| panic!("write panic")),
+        );
+        unsafe {
+            assert_eq!(read(1, 10, 0, std::ptr::null_mut(), 0), 0xfe0e);
+            assert_eq!(write(1, 10, 0, 0, std::ptr::null_mut(), 0), 14);
+        }
+    }
+
+    #[test]
+    fn reject_malformed_hci_lengths() {
+        assert!(
+            validate_packet(&HciPacket {
+                kind: 4,
+                data: vec![0x0e, 4, 1, 3, 0x0c, 0]
+            })
+            .is_ok()
+        );
+        for packet in [
+            HciPacket {
+                kind: 4,
+                data: vec![0x0e],
+            },
+            HciPacket {
+                kind: 4,
+                data: vec![0x0e, 4, 0],
+            },
+            HciPacket {
+                kind: 2,
+                data: vec![0, 0, 10, 0, 1],
+            },
+            HciPacket {
+                kind: 3,
+                data: vec![0, 0],
+            },
+        ] {
+            assert!(validate_packet(&packet).is_err());
+        }
+    }
 }

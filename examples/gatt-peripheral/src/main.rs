@@ -16,6 +16,9 @@ const TX: [u8; 16] = [
 ];
 
 fn main() -> Result<(), Error> {
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let stop_signal = stop.clone();
+    ctrlc::set_handler(move || stop_signal.store(true, std::sync::atomic::Ordering::Relaxed))?;
     let args: Vec<_> = std::env::args().collect();
     let seconds = args
         .windows(2)
@@ -57,7 +60,9 @@ fn main() -> Result<(), Error> {
     let start = Instant::now();
     let mut tick = Instant::now();
     let mut subscribers = std::collections::HashMap::new();
-    while seconds.is_none_or(|s| start.elapsed() < Duration::from_secs(s)) {
+    while !stop.load(std::sync::atomic::Ordering::Relaxed)
+        && seconds.is_none_or(|s| start.elapsed() < Duration::from_secs(s))
+    {
         match server.recv_timeout(Duration::from_millis(100)) {
             Ok(ServerEvent::SubscriptionChanged {
                 connection,

@@ -46,6 +46,12 @@ static void event_handler(uint8_t type, uint16_t channel, uint8_t *packet, uint1
             }
             break;
         case HCI_EVENT_DISCONNECTION_COMPLETE:
+            for (unsigned i = 0; i < 16; i++) {
+                if (send_requests[i].handle == hci_event_disconnection_complete_get_connection_handle(packet)) {
+                    send_requests[i].busy = 0;
+                    send_requests[i].registration.item = NULL;
+                }
+            }
             rust_event(4, hci_event_disconnection_complete_get_connection_handle(packet), 0);
             break;
         case ATT_EVENT_CONNECTED:
@@ -122,6 +128,7 @@ uint8_t rs_notify(uint16_t connection, uint16_t attribute, const uint8_t *data, 
     return att_server_notify(connection, attribute, data, len);
 }
 void rs_stop(void) { advertising_requested = 0; hci_power_control(HCI_POWER_OFF); }
+int rs_is_off(void) { return hci_get_state() == HCI_STATE_OFF; }
 void rs_deinit(void) {
     att_server_deinit(); sm_deinit(); l2cap_deinit(); hci_deinit();
     btstack_run_loop_deinit(); btstack_memory_deinit();

@@ -6,3 +6,4 @@ edition.workspace = true
 [dependencies]
 btstack-gatt = { path = "../../btstack-gatt" }
 btstack-nusb = { path = "../../btstack-nusb" }
+ctrlc = "3.5"

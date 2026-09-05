@@ -170,3 +170,30 @@ pub(crate) fn validate(name: &str, services: &[GattService]) -> Result<Vec<u8>, 
     adv.extend_from_slice(name.as_bytes());
     Ok(adv)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn service() -> GattService {
+        GattService::new([0; 16]).characteristic(
+            GattCharacteristic::new([1; 16])
+                .read()
+                .on_read(|_| Ok(vec![])),
+        )
+    }
+    #[test]
+    fn advertising_limits_count_bytes_and_validate_handlers() {
+        assert_eq!(validate(&"a".repeat(26), &[service()]).unwrap().len(), 31);
+        assert!(validate(&"a".repeat(27), &[service()]).is_err());
+        assert!(validate(&"あ".repeat(9), &[service()]).is_err());
+        assert!(
+            validate(
+                "test",
+                &[GattService::new([0; 16])
+                    .characteristic(GattCharacteristic::new([1; 16]).read())]
+            )
+            .is_err()
+        );
+        assert!(validate("test", &[service(), service()]).is_err());
+    }
+}
