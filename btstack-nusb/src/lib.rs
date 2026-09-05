@@ -38,12 +38,68 @@ pub struct NusbHciTransport {
 }
 
 impl NusbHciTransport {
+    /// Opens a desktop USB controller selected by VID/PID.
+    ///
+    /// Android applications must obtain USB permission through UsbManager and
+    /// use [`Self::from_fd`] or [`Self::from_borrowed_fd`] instead of enumeration.
+    /// Multiple matching devices are rejected; use [`Self::from_device`] to pass
+    /// a particular device selected by the application.
+    #[cfg(not(target_os = "android"))]
     pub fn open(selector: UsbDeviceSelector) -> Result<Self, Error> {
-        let info = nusb::list_devices()
-            .wait()?
-            .find(|d| d.vendor_id() == selector.vendor_id && d.product_id() == selector.product_id)
-            .ok_or("USB Bluetooth controller not found")?;
+        let mut matches = nusb::list_devices().wait()?.filter(|d| {
+            d.vendor_id() == selector.vendor_id && d.product_id() == selector.product_id
+        });
+        let info = matches.next().ok_or_else(|| {
+            format!(
+                "USB Bluetooth controller {:04x}:{:04x} not found",
+                selector.vendor_id, selector.product_id
+            )
+        })?;
+        if matches.next().is_some() {
+            return Err(format!("Multiple USB devices match {:04x}:{:04x}; select one explicitly and use NusbHciTransport::from_device", selector.vendor_id, selector.product_id).into());
+        }
         let device = info.open().wait()?;
+        Self::from_device(device)
+    }
+
+    /// Desktop enumeration is unavailable on Android. Use the permission-granted
+    /// USB file descriptor through `from_fd` or `from_borrowed_fd`.
+    #[cfg(target_os = "android")]
+    pub fn open(_selector: UsbDeviceSelector) -> Result<Self, Error> {
+        Err("Android requires a UsbManager file descriptor; use NusbHciTransport::from_fd or from_borrowed_fd".into())
+    }
+
+    /// Takes ownership of an open usbdevfs file descriptor on Android/Linux.
+    ///
+    /// Uses `nusb::Device::from_fd`; no enumeration or reopening by path occurs.
+    /// The FD is released on failure or when the transport is dropped.
+    /// Pass an owned duplicate, not a descriptor still owned by Java.
+    #[cfg(any(target_os = "android", target_os = "linux"))]
+    pub fn from_fd(fd: std::os::fd::OwnedFd) -> Result<Self, Error> {
+        Self::from_device(nusb::Device::from_fd(fd).wait()?)
+    }
+
+    /// Duplicates a borrowed usbdevfs FD before passing ownership to nusb.
+    ///
+    /// Useful with Android's `UsbDeviceConnection.getFileDescriptor()`. The
+    /// caller must keep the original FD valid during this call. The transport
+    /// owns only the duplicate and never closes the caller's FD. Do not perform
+    /// competing USB operations through the original connection; keep that
+    /// connection open until the GATT server has shut down.
+    #[cfg(any(target_os = "android", target_os = "linux"))]
+    pub fn from_borrowed_fd(fd: std::os::fd::BorrowedFd<'_>) -> Result<Self, Error> {
+        Self::from_fd(fd.try_clone_to_owned()?)
+    }
+
+    /// Creates an HCI transport from an already opened nusb device.
+    ///
+    /// Claims interface 0 and discovers its event and ACL endpoints. On Linux,
+    /// detaches the kernel driver; Android uses the permission-granted FD and
+    /// claims the interface without requesting a kernel-driver detach.
+    pub fn from_device(device: nusb::Device) -> Result<Self, Error> {
+        let descriptor = device.device_descriptor();
+        let vendor_id = descriptor.vendor_id();
+        let product_id = descriptor.product_id();
         #[cfg(target_os = "linux")]
         let interface = device.detach_and_claim_interface(0).wait()?;
         #[cfg(not(target_os = "linux"))]
@@ -69,7 +125,7 @@ impl NusbHciTransport {
         let output = output.ok_or("Missing bulk OUT endpoint")?;
         println!(
             "USB {:04x}:{:04x}, interface 0, event IN {event:#04x}, ACL IN {input:#04x}, ACL OUT {output:#04x}",
-            selector.vendor_id, selector.product_id
+            vendor_id, product_id
         );
         let mut events = interface.endpoint::<Interrupt, In>(event)?;
         let mut acl = interface.endpoint::<Bulk, In>(input)?;

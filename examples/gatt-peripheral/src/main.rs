@@ -1,8 +1,10 @@
 use btstack_gatt::{
     Error, GattCharacteristic, GattServer, GattService, ServerEvent, SubscriptionType,
 };
-use btstack_nusb::{NusbHciTransport, UsbDeviceSelector};
+use btstack_nusb::NusbHciTransport;
 use std::time::{Duration, Instant};
+
+mod args;
 
 // Nordic UART service UUIDs, in canonical big-endian order.
 const SERVICE: [u8; 16] = [
@@ -16,17 +18,16 @@ const TX: [u8; 16] = [
 ];
 
 fn main() -> Result<(), Error> {
+    let args = args::Args::parse(std::env::args().skip(1))?;
+    if args.help {
+        println!("{}", args::USAGE);
+        return Ok(());
+    }
     let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let stop_signal = stop.clone();
     ctrlc::set_handler(move || stop_signal.store(true, std::sync::atomic::Ordering::Relaxed))?;
-    let args: Vec<_> = std::env::args().collect();
-    let seconds = args
-        .windows(2)
-        .find(|a| a[0] == "--seconds")
-        .map(|a| a[1].parse::<u64>())
-        .transpose()?;
-    let usb = NusbHciTransport::open(UsbDeviceSelector::new(0x0411, 0x0374))?;
-    if args.iter().any(|a| a == "--probe") {
+    let usb = NusbHciTransport::open(args.selector)?;
+    if args.probe {
         return Ok(());
     }
     let mut server = GattServer::builder(usb)
@@ -61,7 +62,9 @@ fn main() -> Result<(), Error> {
     let mut tick = Instant::now();
     let mut subscribers = std::collections::HashMap::new();
     while !stop.load(std::sync::atomic::Ordering::Relaxed)
-        && seconds.is_none_or(|s| start.elapsed() < Duration::from_secs(s))
+        && args
+            .seconds
+            .is_none_or(|s| start.elapsed() < Duration::from_secs(s))
     {
         match server.recv_timeout(Duration::from_millis(100)) {
             Ok(ServerEvent::SubscriptionChanged {
