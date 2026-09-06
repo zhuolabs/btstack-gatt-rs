@@ -1,6 +1,8 @@
 //! Single-threaded BTstack runtime and transport boundary.
 
+mod advertising;
 mod gatt;
+pub use advertising::AdvertisingData;
 mod runtime;
 pub use gatt::*;
 pub use runtime::Runtime;

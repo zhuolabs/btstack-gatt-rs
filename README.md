@@ -130,6 +130,22 @@ See the [example](examples/gatt-peripheral/src/main.rs).
 - Callbacks execute on the BTstack thread. Keep them short and do not call blocking
   server methods from them. Panics are caught at the FFI boundary and converted to ATT errors.
 
+## Advertising configuration
+
+GATT registration and advertising are independent. Existing builders keep advertising Flags plus the local name. To advertise a 128-bit service UUID instead:
+
+```rust
+let server = GattServer::builder(transport)
+    .name("My peripheral") // GAP Device Name; omitted from this advertising payload
+    .service(service)
+    .advertise_service_uuid(service_uuid) // canonical big-endian [u8; 16]
+    .start()?;
+```
+
+For an explicit payload, use `.advertising_data(AdvertisingData::new().service_uuid(service_uuid).local_name("Example"))`. `AdvertisingData` is re-exported by `btstack_gatt`. Explicit data replaces default name advertising; a subsequent `advertise_service_uuid` extends it. Register the actual service separately with `.service(...)`.
+
+Payloads contain Flags (0x06), an optional Complete List of 128-bit Service UUIDs, and an optional Complete Local Name. The library handles Bluetooth UUID byte order and validates the legacy 31-byte limit before controller startup. One UUID leaves eight UTF-8 bytes for a name; a second distinct UUID cannot fit. Duplicate UUIDs are ignored, empty names and oversized payloads fail, and nothing is silently truncated. Scan response and extended advertising are not implemented. `start()` still waits for controller-confirmed advertising enablement.
+
 ## Validation
 
 ```powershell

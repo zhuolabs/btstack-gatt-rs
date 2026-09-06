@@ -166,9 +166,7 @@ pub(crate) fn validate(name: &str, services: &[GattService]) -> Result<Vec<u8>, 
             "Initial implementation supports at most 16 services and 64 characteristics".into(),
         );
     }
-    let mut adv = vec![2, 1, 6, (name.len() + 1) as u8, 9];
-    adv.extend_from_slice(name.as_bytes());
-    Ok(adv)
+    crate::AdvertisingData::new().local_name(name).to_bytes()
 }
 
 #[cfg(test)]

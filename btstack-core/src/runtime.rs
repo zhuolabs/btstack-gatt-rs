@@ -64,7 +64,22 @@ impl Runtime {
         name: String,
         services: Vec<GattService>,
     ) -> Result<Self, Error> {
-        let adv = validate(&name, &services)?;
+        Self::start_with_advertising(transport, name, services, None)
+    }
+
+    /// Explicit advertising replaces the default name-only payload. Validation
+    /// completes before reserving the runtime or issuing any HCI commands.
+    pub fn start_with_advertising(
+        transport: impl HciTransport,
+        name: String,
+        services: Vec<GattService>,
+        advertising: Option<AdvertisingData>,
+    ) -> Result<Self, Error> {
+        let default_adv = validate(&name, &services)?;
+        let adv = match advertising {
+            Some(data) => data.to_bytes()?,
+            None => default_adv,
+        };
         if ACTIVE
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .is_err()
