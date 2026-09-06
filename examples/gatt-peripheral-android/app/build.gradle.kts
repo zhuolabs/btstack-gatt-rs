@@ -1,4 +1,7 @@
-plugins { id("com.android.application") }
+plugins {
+    id("com.android.application")
+    id("org.jetbrains.kotlin.plugin.compose")
+}
 
 android {
     namespace = "com.example.gattperipheral"
@@ -12,6 +15,7 @@ android {
         ndk { abiFilters += "arm64-v8a" }
     }
     ndkVersion = "27.0.12077973"
+    buildFeatures { compose = true }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -21,6 +25,13 @@ android {
 }
 
 dependencies {
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
+    implementation(platform("androidx.compose:compose-bom:2026.03.01"))
+    implementation("androidx.compose.material3:material3")
+    implementation("androidx.activity:activity-compose:1.13.0")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0")
     implementation("androidx.annotation:annotation:1.9.1")
     implementation("net.java.dev.jna:jna:5.17.0@aar")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")

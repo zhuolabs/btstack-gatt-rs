@@ -44,7 +44,8 @@ APK: `app/build/outputs/apk/debug/app-debug.apk`.
 ## Run and verify
 
 1. Attach the dongle to the Android device's USB Host/OTG port.
-2. Open **GATT Peripheral**, tap **Start GATT server**, and accept USB access.
+2. Open **GATT Peripheral** and accept USB access. The server starts automatically
+   while the screen's Lifecycle Owner is STARTED (including RESUMED).
 3. Keep the activity visible. Advertising startup and GATT events appear in:
 
    ```powershell
@@ -61,10 +62,36 @@ APK: `app/build/outputs/apk/debug/app-debug.apk`.
    when using another device. The script tests advertising, service discovery,
    read, write request, write command, notification, unsubscribe and reconnection.
 
-5. **Stop GATT server** cancels the coroutine and waits for native cleanup.
-   Leaving the activity or detaching the dongle also cancels it. Tap Start again
-   when returning to the activity. This is an activity-scoped example, not a
-   background/foreground service.
+5. Leaving the activity cancels the coroutine and waits for native cleanup.
+   Returning to STARTED automatically opens a fresh USB connection and resumes.
+   **Stop GATT server** explicitly disables automatic resume until **Start GATT
+   server** is pressed; this choice survives Activity recreation via SavedStateHandle.
+   Detaching the dongle also cancels the session; reattachment retries while the
+   screen is STARTED and the server remains enabled. This is an activity-scoped
+   example, not a background/foreground service.
+
+## Compose and Lifecycle
+
+`MainActivity` is a `ComponentActivity` displaying a Material 3 Compose screen.
+`LocalLifecycleOwner` supplies the actual screen owner and
+`collectAsStateWithLifecycle()` observes the ViewModel's UI state. A
+`LaunchedEffect` keyed by that owner calls `repeatOnLifecycle(STARTED)` through
+`repeatGattWhileStarted`. ON_STOP moves Lifecycle to CREATED (there is no
+`Lifecycle.State.STOPPED`), cancelling the session; ON_START starts a new one.
+
+The helper holds a process-wide Mutex because BTstack permits one active server.
+This waits for the previous owner's non-cancellable USB cleanup even if an entirely
+new Activity/ViewModel starts before the previous Activity finishes stopping.
+Within an owner, `collectLatest` serializes explicit Start/Stop and USB changes.
+USB permissions and UI state are managed by the ViewModel using the Application
+context; permission results cannot start a server while its Lifecycle is stopped.
+
+`GattLifecycleTest` uses LifecycleRegistry and virtual coroutine time to verify
+STOP→immediate START and owner replacement both wait for resource release:
+
+```powershell
+./gradlew.bat testDebugUnitTest
+```
 
 The hard-coded Nordic UART service matches the desktop sample:
 
@@ -94,7 +121,7 @@ oneshot future; GATT's blocking loop runs on the native worker without Tokio.
 Dropping the future on cancellation stops and joins that worker. Kotlin also
 calls the idempotent `stop()` barrier and `destroy()` in a
 `NonCancellable + Dispatchers.IO` finally block, including cancellation before
-the first native future poll. Only then does the activity close the connection.
+the first native future poll. Only then does the lifecycle-scoped session close the connection.
 Startup cancellation can wait for the library's bounded controller startup.
 
 No Rust-to-Kotlin callbacks are used. Rust stdout/stderr are redirected through
@@ -120,6 +147,11 @@ Pixel 9a over wireless adb, Realtek/Buffalo `0411:0374`, Windows PC central:
 - Stop button cancellation: `HCI_STATE_OFF`, USB release, then successful restart.
 - Home/activity stop: native shutdown and USB release confirmed; subsequent run
   also passed two central verification rounds.
+- Compose version: Home→launcher automatically resumed without pressing Start;
+  the PC script passed two rounds after resume. Explicit Stop remained disabled
+  after Home→launcher. A rapid switch to a second Activity instance waited for
+  the first instance's USB release before successfully advertising again.
+- Compose lifecycle tests (2), `assembleDebug` and `lintDebug` passed.
 - Host workspace tests (11), host and Android ARM64 Clippy, APK build and Android
   Lint passed (no lint errors; advisory warnings remain).
 

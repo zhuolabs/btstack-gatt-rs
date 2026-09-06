@@ -130,3 +130,21 @@ Initial observation: the first PC connection timed out; a subsequent scan missed
 the advertisement. Stop/Start recovered operation, followed by successful runs.
 The initial failure's cause remains unknown. Physical USB detach during traffic,
 older Android versions, other phone models and long-duration operation were not tested.
+
+## Compose Lifecycle revision — 2026-09-06
+
+- Previous View-based implementation checkpoint: `11f67b5`.
+- Compose Material 3 screen with LocalLifecycleOwner, lifecycle-aware UI state,
+  and repeatOnLifecycle(STARTED) for the server session.
+- Pixel 9a: Home caused HCI_STATE_OFF and USB release; returning through the
+  launcher automatically started advertising. The PC script then passed two
+  rounds, including read/write/notify, unsubscribe and reconnect (15:36 JST).
+- Explicit Stop remained stopped after Home/return (`resume enabled=false`).
+  Start re-enabled the session.
+- An initial rapid switch to a separate Activity reproduced USB `errno 16` with
+  a per-ViewModel lock. After moving serialization to a process-wide lifecycle
+  gate, the same switch released the previous USB connection before the next
+  owner advertised successfully (15:37 JST).
+- Two JVM tests exercise STOP/immediate START and replacement of Lifecycle Owner,
+  including delayed non-cancellable cleanup. `testDebugUnitTest`, `assembleDebug`
+  and `lintDebug` passed. Existing Rust code was unchanged.
