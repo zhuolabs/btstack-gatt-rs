@@ -92,9 +92,14 @@ See [Android integration](docs/ANDROID.md) for permission handling, Rust example
 FD ownership, and NDK build commands. The existing CLI is for desktop enumeration;
 an Android app should call the FD API through its native integration.
 
-All four Android ABIs cross-build successfully with NDK 27 and API level 23.
-Android USB hardware operation has not been verified. This repository provides
-the native Rust library, not a complete Android APK or a JNI application layer.
+The complete [Android sample](examples/gatt-peripheral-android/README.md) uses
+Android CLI, USB Host and UniFFI 0.31. Kotlin calls a suspend function; coroutine
+cancellation stops BTstack and releases USB, and GATT events appear in logcat.
+It was verified on a Pixel 9a with `0411:0374` using the PC central script,
+including read/write/notify, reconnection, stop and restart.
+
+All four library ABIs cross-build with NDK 27 and API level 23. The Android
+application sample packages ARM64 and targets API 26+.
 
 ## Exposed services
 

@@ -87,8 +87,46 @@ claimed as verified by the startup and GATT smoke tests above.
   including non-USB FD rejection, preservation of borrowed FDs on failure, and
   rejection of desktop enumeration on Android. These Android tests were compiled,
   not executed; no Android device was attached.
-- Android USB permission and GATT operation on real hardware remain unverified.
+- Android hardware was unverified at this stage; see the subsequent app validation below.
 - Windows and Android ARM64 Clippy pass with warnings denied. The Android TLS
   macro expansion produces a spurious `missing_const_for_thread_local` lint even
   with const initializers; its allowance is scoped to the TLS declarations on
   Android. Rust examples in `docs/ANDROID.md` also type-check for Android ARM64.
+
+## Android UniFFI app — 2026-09-06
+
+`examples/gatt-peripheral-android` was created using official Android CLI
+1.0.16261425 (`android init`, `android create empty-activity`). Tested with
+UniFFI 0.31.0, AGP 9.0.1, Gradle 9.1.0, NDK 27.0.12077973, API 26 / ARM64.
+
+Device: Pixel 9a, wireless adb, USB Host dongle `0411:0374` (Realtek Bluetooth
+Radio), controller address `08:BE:AC:47:46:F7`. PC central: Windows-managed
+Realtek Bluetooth Adapter. No driver changes or pairing were needed.
+
+- Installed/launched the debug APK with `android run`, selected Start and accepted
+  the normal USB permission dialog through the UI.
+- USB FD duplication, interface claim, `HCI_STATE_WORKING` and advertising enable
+  status `0x00` were confirmed in `adb logcat -s BtstackGatt`.
+- The unmodified `uv run scripts/verify_gatt.py --rounds 2` passed all checks in
+  two successive rounds: scan, service discovery, read, write request/command,
+  notify, unsubscribe, disconnect and reconnect.
+- logcat showed `on_read TX`, both write payloads, and `SubscriptionChanged`
+  Notify/None for each connection.
+- Stop button cancelled the Kotlin coroutine; logcat showed `HCI_STATE_OFF`,
+  `GATT server stopped; USB interface released`, then Kotlin connection cleanup.
+  Restarting in the same process successfully reclaimed the controller.
+- Leaving the activity with Home also stopped the server and released USB.
+  Returning/restarting passed another two-round PC test.
+- Host tests: 11 passed, one desktop hardware test intentionally ignored because
+  the dongle was attached to Android. New tests exercise native future cancellation
+  and stop-before-first-poll cleanup. Host/Android ARM64 Clippy and Android
+  `assembleDebug lintDebug` passed; lint advisory warnings remain.
+- Final APK (Android-specific UniFFI bindings enabled): after the user's other BLE
+  client disconnected, the two-round PC test passed again at 15:24 JST, including
+  notifications `tick 100` and `tick 106`. Server logcat recorded connection IDs
+  3 and 4 and both write payloads. The app was left running for further testing.
+
+Initial observation: the first PC connection timed out; a subsequent scan missed
+the advertisement. Stop/Start recovered operation, followed by successful runs.
+The initial failure's cause remains unknown. Physical USB detach during traffic,
+older Android versions, other phone models and long-duration operation were not tested.

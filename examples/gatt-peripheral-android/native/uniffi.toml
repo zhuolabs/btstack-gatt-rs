@@ -1,0 +1,4 @@
+[bindings.kotlin]
+android = true
+package_name = "com.example.gattperipheral.nativebridge"
+cdylib_name = "gatt_peripheral_android"

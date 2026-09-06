@@ -42,7 +42,11 @@ check(rawFd >= 0)
 // Do not call connection.claimInterface(): nusb claims interface 0.
 ```
 
-This is library integration guidance, not a complete Android app. Permission UI,
+For a complete UniFFI/Kotlin application, see
+[`examples/gatt-peripheral-android`](../examples/gatt-peripheral-android/README.md).
+It includes USB permission UI, cancellation, logcat output and real-device
+validation with the PC central script. The following sections describe the
+underlying library integration. Permission UI,
 the JNI boundary, lifecycle/foreground-service policy, and application event
 handling belong to the integrating app. Refer to the official
 [USB host guide](https://developer.android.com/develop/connectivity/usb/host) and
@@ -144,6 +148,7 @@ in this workspace are ordinary Rust libraries to link into that native layer.
 
 Verified on 2026-09-06: all four ABI workspace builds pass on a Windows host with
 NDK `27.0.12077973`, Rust 1.95.0, and API level 23. Windows VID/PID startup also
-passes against the physical `0411:0374` dongle. No Android device was connected;
-USB permission, FD initialization, and GATT operation on Android hardware remain
-unverified.
+passes against the physical `0411:0374` dongle. Subsequently, the Android sample
+was verified on a Pixel 9a with that dongle: USB permission, FD initialization,
+advertising, read/write/notify, reconnect, coroutine cancellation and restart.
+See the sample README for the tested configuration and remaining limitations.

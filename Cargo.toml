@@ -1,5 +1,5 @@
 [workspace]
-members = ["btstack-sys", "btstack-core", "btstack-nusb", "btstack-gatt", "examples/gatt-peripheral"]
+members = ["btstack-sys", "btstack-core", "btstack-nusb", "btstack-gatt", "examples/gatt-peripheral", "examples/gatt-peripheral-android/native"]
 resolver = "2"
 
 [workspace.package]
