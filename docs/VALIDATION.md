@@ -148,3 +148,18 @@ older Android versions, other phone models and long-duration operation were not 
 - Two JVM tests exercise STOP/immediate START and replacement of Lifecycle Owner,
   including delayed non-cancellable cleanup. `testDebugUnitTest`, `assembleDebug`
   and `lintDebug` passed. Existing Rust code was unchanged.
+
+## Android USB receive buffer allocation — 2026-09-06
+
+- Replaced Android endpoint zero-copy allocation attempts with `Buffer::new`.
+  Android SELinux denied usbdevfs `mmap`; nusb fell back to heap buffers, but
+  allocating on every receive produced repeated `avc: denied { map }` messages.
+- Interrupt/event and bulk/ACL receive buffers are now resubmitted after their
+  payload is copied. nusb preserves `requested_len` on completion, including
+  short packets. Other platforms retain endpoint allocation for the initial
+  buffers and also reuse them.
+- Host workspace tests (11), host Clippy, Android ARM64 transport Clippy, and
+  Android debug APK build passed.
+- Updated Pixel 9a app: `verify_gatt.py --rounds 2` passed every check at 15:49 JST,
+  including notifications `tick 12` and `tick 18`. Logcat for the new process
+  (PID 14328) contained zero USB mmap denial messages during startup and traffic.

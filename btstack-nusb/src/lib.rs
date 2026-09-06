@@ -136,8 +136,17 @@ impl NusbHciTransport {
         let worker = thread::Builder::new()
             .name("hci-usb-rx".into())
             .spawn(move || {
-                events.submit(events.allocate(512));
-                acl.submit(acl.allocate(2048));
+                // Android permits USB transfers but may deny usbdevfs mmap.
+                // Skip the zero-copy allocation attempt (and SELinux audit noise).
+                #[cfg(target_os = "android")]
+                let (event_buffer, acl_buffer) = (
+                    nusb::transfer::Buffer::new(512),
+                    nusb::transfer::Buffer::new(2048),
+                );
+                #[cfg(not(target_os = "android"))]
+                let (event_buffer, acl_buffer) = (events.allocate(512), acl.allocate(2048));
+                events.submit(event_buffer);
+                acl.submit(acl_buffer);
                 while !stopped.load(Ordering::Relaxed) {
                     for (kind, result) in [
                         (4, events.wait_next_complete(Duration::from_millis(2))),
@@ -155,10 +164,12 @@ impl NusbHciTransport {
                             if !packet.data.is_empty() && tx.try_send(Ok(packet)).is_err() {
                                 return;
                             }
+                            // Completion preserves requested_len, even for short
+                            // packets. Reuse the buffer after copying its payload.
                             if kind == 4 {
-                                events.submit(events.allocate(512));
+                                events.submit(result.buffer);
                             } else {
-                                acl.submit(acl.allocate(2048));
+                                acl.submit(result.buffer);
                             }
                         }
                     }
